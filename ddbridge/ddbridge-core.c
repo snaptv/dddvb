@@ -192,6 +192,22 @@ done:
 	return 0;
 }
 
+static int disconnect_input(u32 i)
+{
+	struct ddb *idev = ddbs[(i >> 4) & 0x3f];
+	struct ddb_input *input;
+
+	if (!idev)
+		return -EINVAL;
+
+	input = &idev->input[i & 7];
+	if (input->connected_ci_port) {
+		ddb_unredirect(input->connected_ci_port);
+		input->connected_ci_port = NULL;
+	}
+	return 0;
+}
+
 static int ddb_redirect(u32 i, u32 p)
 {
 	struct ddb *idev = ddbs[(i >> 4) & 0x3f];
@@ -232,6 +248,7 @@ static int ddb_redirect(u32 i, u32 p)
 		}
 	}
 	input->redo = port->output;
+	input->connected_ci_port = port;
 	port->output->redi = input;
 
 	ddb_redirect_dma(input->port->dev, input->dma, port->output->dma);
@@ -3895,6 +3912,28 @@ static ssize_t gtl_snr_store(struct device *device, struct device_attribute *att
 	return 0;
 }
 
+static ssize_t disconnect_show(struct device *device,
+			     struct device_attribute *attr, char *buf)
+{
+	return 0;
+}
+
+static ssize_t disconnect_store(struct device *device,
+			      struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	unsigned int i;
+	int res;
+
+	if (sscanf(buf, "%x\n", &i) != 1)
+		return -EINVAL;
+	res = disconnect_input(i);
+	if (res < 0)
+		return res;
+	dev_info(device, "redirect: (disconnect) %02x\n", i);
+	return count;
+}
+
 static ssize_t redirect_show(struct device *device,
 			     struct device_attribute *attr, char *buf)
 {
@@ -4103,6 +4142,7 @@ static struct device_attribute ddb_attrs[] = {
 #if 0
 	__ATTR_RO(qam),
 #endif
+	__ATTR(disconnect, 0664, disconnect_show, disconnect_store),
 	__ATTR(redirect, 0664, redirect_show, redirect_store),
 	__ATTR_MRO(snr,  bsnr_show),
 	__ATTR_RO(bpsnr),
