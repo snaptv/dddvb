@@ -264,6 +264,7 @@ struct ddb_io {
 	struct ddb_dma        *dma;
 	struct ddb_io         *redo;
 	struct ddb_io         *redi;
+	struct ddb_port       *connected_ci_port;
 };
 
 #define ddb_output ddb_io
