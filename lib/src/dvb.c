@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #define DTV_SCRAMBLING_SEQUENCE_INDEX 70
 #define DTV_INPUT                     71
@@ -244,7 +245,7 @@ static int set_en50607(struct dddvb_fe *fe, uint32_t freq_khz, uint32_t sr,
 	uint32_t t = freq - 100;
 	uint32_t input = 3 & (sat >> 6);
 	int fd = fe->fd;
-	
+
 	dbgprintf(DEBUG_DVB, "input = %u, sat = %u\n", input, sat&0x3f);
 	hor &= 1;
 	cmd.msg[1] = slot << 3;
@@ -651,12 +652,12 @@ static void get_stats(struct dddvb_fe *fe)
 
 		fe->strength = str = st.stat[0].svalue;
 		dbgprintf(DEBUG_DVB, "fe%d: str=%lld.%03llddB\n",
-			  fe->nr, str/1000, abs(str%1000));
+			  fe->nr, (long long int)str/1000, (long long int)abs(str%1000));
 	}
 	if (!get_stat(fe->fd, DTV_STAT_CNR, &st)) {
 		fe->cnr = cnr = st.stat[0].svalue;
 		dbgprintf(DEBUG_DVB, "fe%d: cnr=%lld.%03llddB\n",
-			  fe->nr, cnr/1000, abs(cnr%1000));
+			  fe->nr, (long long int)cnr/1000, (long long int)abs(cnr%1000));
 	}
 	if (!get_stat(fe->fd, DTV_STAT_PRE_TOTAL_BIT_COUNT, &st) &&
 	    (st.stat[0].scale == FE_SCALE_COUNTER)) {
@@ -668,19 +669,19 @@ static void get_stats(struct dddvb_fe *fe)
 	    (st.stat[0].scale == FE_SCALE_COUNTER)) {
 		uval = st.stat[0].uvalue;
 		dbgprintf(DEBUG_DVB, "fe%d: pre_error_bit_count = %llu\n",
-			  fe->nr, uval);
+			  fe->nr, (long long int)uval);
 	}
 	if (!get_stat(fe->fd, DTV_STAT_ERROR_BLOCK_COUNT, &st) &&
 	    (st.stat[0].scale == FE_SCALE_COUNTER)) {
 		uval = st.stat[0].uvalue;
 		dbgprintf(DEBUG_DVB, "fe%d: error_block_count = %llu\n",
-			  fe->nr, uval);
+			  fe->nr, (long long int)uval);
 	}
 	if (!get_stat(fe->fd, DTV_STAT_TOTAL_BLOCK_COUNT, &st) &&
 	    (st.stat[0].scale == FE_SCALE_COUNTER)) {
 		uval = st.stat[0].uvalue;
 		dbgprintf(DEBUG_DVB, "fe%d: total_block_count = %llu\n",
-			  fe->nr, uval);
+			  fe->nr, (long long int)uval);
 	}
 }
 
@@ -732,7 +733,7 @@ void dddvb_fe_handle(struct dddvb_fe *fe)
 			} else {
 				max = 1;
 				nolock++;
-				if (nolock > 10)
+				if (nolock > 40)
 					fe->tune = 1;
 			}
 			break;
@@ -798,6 +799,8 @@ static int dddvb_fe_init(struct dddvb *dd, int a, int f, int fd)
 	int r;
 	uint32_t i, ds;
 
+	if (dd->dvbca_num >= DDDVB_MAX_DVB_CA)
+		return -1;
 	fe = &dd->dvbfe[dd->dvbfe_num];
 
 	r = snprintf(fe->name, sizeof(fe->name), "/dev/dvb/adapter%d/frontend%d", a, f);
@@ -809,8 +812,10 @@ static int dddvb_fe_init(struct dddvb *dd, int a, int f, int fd)
 	dps.props = dp;
 	dp[0].cmd = DTV_ENUM_DELSYS;
 	r = ioctl(fd, FE_GET_PROPERTY, &dps);
-	if (r < 0)
+	if (r < 0) {
+		dbgprintf(DEBUG_DVB, "Could not get delsys, error=%d\n", errno);
 		return -1;
+	}
 	for (i = 0; i < dp[0].u.buffer.len; i++) {
 		ds = dp[0].u.buffer.data[i];
 		dbgprintf(DEBUG_DVB, "delivery system %d\n", ds);
@@ -867,7 +872,7 @@ static int scan_dvbfe(struct dddvb *dd)
 	int a, f, fd;
 	char fname[80];
 
-	for (a = 0; a < 16; a++) {
+	for (a = 0; a < 256; a++) {
 		for (f = 0; f < 24; f++) {
 			sprintf(fname, "/dev/dvb/adapter%d/frontend%d", a, f); 
 			fd = open(fname, O_RDONLY);
