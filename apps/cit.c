@@ -10,8 +10,9 @@
 #include <sys/ioctl.h>
 #include <pthread.h>
 #include <getopt.h>
+#include <linux/dvb/ca.h>
 
-uint32_t adapter = 0, device = 0, snum = 256, rnum = 256;
+uint32_t adapter = 0, device = 0, snum = 256, rnum = 256, do_reset = 0;
 
 uint8_t fill[188]={0x47, 0x1f, 0xff, 0x10,
    0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
@@ -83,6 +84,8 @@ void proc_buf(uint8_t *buf, uint32_t *d)
 	c=(buf[4]<<24)|(buf[5]<<16)|(buf[6]<<8)|buf[7];
 	if (c!=*d) {
 		printf("CONT ERROR: got %08x  expected %08x\n", c, *d);
+		if (!*d && (c+100) > 100)
+			return;
 		*d=c;
 	} else {
 		if (memcmp(ts+8, buf+8, 180))
@@ -169,6 +172,34 @@ int send(void)
 }
 
 
+
+void reset()
+{
+	char fname[80];
+	int fd, i;
+	
+	sprintf(fname, "/dev/dvb/adapter%u/ca%u", adapter, device);
+	fd=open(fname, O_WRONLY);
+	if (fd < 0)
+		return;
+	
+	ioctl(fd, CA_RESET);
+
+	for (i=0; i<24; i++) {
+	        ca_slot_info_t info;
+
+		usleep(500000);
+		info.num = 0;
+		if (ioctl(fd, CA_GET_SLOT_INFO, &info))
+			return;
+		if (info.flags & CA_CI_MODULE_READY)
+			break;
+	}
+	if (i==24)
+		dprintf(2, "RESET failed\n");
+
+}
+
 int main(int argc, char **argv)
 {
 	pthread_t th;
@@ -181,11 +212,12 @@ int main(int argc, char **argv)
 			{"device", required_argument, 0, 'd'},
 			{"snum", required_argument, 0, 's'},
 			{"rnum", required_argument, 0, 'r'},
+			{"reset", no_argument, 0, 'R'},
 			{"help", no_argument , 0, 'h'},
 			{0, 0, 0, 0}
 		};
                 c = getopt_long(argc, argv, 
-				"a:d:h",
+				"a:d:hs:R",
 				long_options, &option_index);
 		if (c==-1)
  			break;
@@ -203,6 +235,9 @@ int main(int argc, char **argv)
 		case 'r':
 			rnum = strtoul(optarg, NULL, 10);
 			break;
+		case 'R':
+			do_reset = 1;
+			break;
 		case 'h':
 			printf("cit -a<adapter> -d<device>\n");
 			exit(-1);
@@ -214,6 +249,11 @@ int main(int argc, char **argv)
 	if (optind < argc) {
 		printf("Warning: unused arguments\n");
 	}
+	if (do_reset) {
+		reset();
+		exit(0);
+	}
+		
 	printf("adapter %d, device: %d\n", adapter, device);
 	memset(ts+8, 180, 0x5a);
 	pthread_create(&th, NULL, get_ts, NULL);
