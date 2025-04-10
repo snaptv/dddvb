@@ -2051,6 +2051,7 @@ static int init_xo2_ci(struct ddb_port *port)
 	if (res < 0)
 		return res;
 
+	dev_info(dev->dev, "Port %d: version %u.%u\n", data[0], data[1]);
 	if (data[0] > 1)  {
 		dev_info(dev->dev, "Port %d: invalid XO2 CI %02x\n",
 			 port->nr, data[0]);
@@ -3351,6 +3352,8 @@ static long ddb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		if ((reg.reg & 0xfffffff) >= dev->regs_len)
 			return -EINVAL;
+		if (reg.reg & 3)
+			return -EINVAL;
 		reg.val = ddbreadl(dev, reg.reg);
 		if (copy_to_user(parg, &reg, sizeof(reg)))
 			return -EFAULT;
@@ -3363,6 +3366,8 @@ static long ddb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (copy_from_user(&reg, parg, sizeof(reg)))
 			return -EFAULT;
 		if ((reg.reg & 0xfffffff) >= dev->regs_len)
+			return -EINVAL;
+		if (reg.reg & 3)
 			return -EINVAL;
 		ddbwritel(dev, reg.val, reg.reg);
 		break;
@@ -4110,7 +4115,7 @@ static struct class ddb_class = {
 	.devnode        = ddb_devnode,
 };
 
-int ddb_class_create(void)
+static int ddb_class_create(void)
 {
 	ddb_major = register_chrdev(0, DDB_NAME, &ddb_fops);
 	if (ddb_major < 0)
@@ -4120,7 +4125,7 @@ int ddb_class_create(void)
 	return 0;
 }
 
-void ddb_class_destroy(void)
+static void ddb_class_destroy(void)
 {
 	class_unregister(&ddb_class);
 	unregister_chrdev(ddb_major, DDB_NAME);
@@ -4328,9 +4333,11 @@ static int ddb_gtl_init_link(struct ddb *dev, u32 l)
 
 	dev_info(dev->dev, "GTL %s\n", dev->link[l].info->name);
 
-	dev_info(dev->dev, "GTL HW %08x REGMAP %08x\n",
+	dev_info(dev->dev, "GTL HW %08x REGMAP %08x FW %u.%u\n",
 		 dev->link[l].ids.hwid,
-		 dev->link[l].ids.regmapid);
+		 dev->link[l].ids.regmapid,
+		 (dev->link[l].ids.hwid & 0xff0000) >> 16,
+		 dev->link[l].ids.hwid & 0xffff);
 	dev_info(dev->dev, "GTL ID %08x\n",
 		 ddbreadl(dev, DDB_LINK_TAG(l) | 8));
 
@@ -4484,9 +4491,20 @@ static int ddb_init_boards(struct ddb *dev)
 			    ((link->info->type == DDB_MOD) &&
 			     (link->ids.revision == 1)))
 				mci_init(link);
-		}
+			else if (link->info->version == 17)
+				mci_init(link);
+		} 
 		if (l)
 			continue;
+		if (dev->link[0].info->type == DDB_MOD &&
+		    dev->link[0].info->version == 18) {
+			u32 lic = ddbreadl(dev, 0x260) >> 24;
+			
+			if (lic == 16)
+				dev->link[0].info =
+					get_ddb_info(0xdd01, 0x0222, 0xdd01, 0x0002);
+		}
+			
 		if (dev->link[0].info->type == DDB_MOD &&
 		    dev->link[0].info->version == 2) {
 			u32 lic = ddbreadl(dev, 0x1c) & 7;
